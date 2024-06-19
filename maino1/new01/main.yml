@@ -1,1 +1,65 @@
+---
+- name: Install CloudWatch
+  hosts: win
+  tasks:
+    - name: Create deployment directory if it does not exist
+      win_file:
+        path: C:\Deployments
+        state: directory
+
+    - name: Download CloudWatch agent installer
+      win_get_url:
+        url: https://amazoncloudwatch-agent.s3.amazonaws.com/windows/amd64/latest/amazon-cloudwatch-agent.msi
+        dest: C:\Deployments\amazon-cloudwatch-agent.msi
+
+    - name: Verify the CloudWatch agent installer exists
+      win_stat:
+        path: C:\Deployments\amazon-cloudwatch-agent.msi
+      register: installer_stat
+
+    - name: Fail if the CloudWatch agent installer does not exist
+      fail:
+        msg: "The CloudWatch agent installer was not downloaded correctly."
+      when: not installer_stat.stat.exists
+
+    - name: Install CloudWatch agent
+      win_package:
+        path: C:\Deployments\amazon-cloudwatch-agent.msi
+        state: present
+
+    - name: Download CloudWatch configuration file with headers
+      win_shell: |
+        $credentials = "188b5e7e0ed45a83e27a781cca4a7bbecf0e1a85"
+        $repo = "https://raw.githubusercontent.com/frontline-devops/Hayes-Jenkins/main/Tools"
+        $file = "HSS-DEV-IIS-cwconfig.json"
+        $headers = New-Object "System.Collections.Generic.Dictionary[[String],[String]]"
+        $headers.Add("Authorization", "token $credentials")
+        $headers.Add("Accept", "application/json")
+        $download = "$repo/$file"
+        Write-Host "Downloading latest release"
+        Invoke-WebRequest -Uri $download -Headers $headers -OutFile "C:\\ProgramData\\Amazon\\AmazonCloudWatchAgent\\HSS-DEV-IIS-cwconfig.json"
+      args:
+        executable: powershell
+
+    - name: Verify the CloudWatch configuration file exists
+      win_stat:
+        path: C:\ProgramData\Amazon\AmazonCloudWatchAgent\HSS-DEV-IIS-cwconfig.json
+      register: config_stat
+
+    - name: Fail if the CloudWatch configuration file does not exist
+      fail:
+        msg: "The CloudWatch configuration file was not downloaded correctly."
+      when: not config_stat.stat.exists
+
+    - name: Ensure PowerShell execution policy is set to Bypass
+      win_shell: Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force
+      args:
+        executable: powershell
+
+    - name: Apply CloudWatch configuration
+      win_shell: |
+        & "C:\Program Files\Amazon\AmazonCloudWatchAgent\amazon-cloudwatch-agent-ctl.ps1" -a fetch-config -m ec2 -s -c file:"C:\ProgramData\Amazon\AmazonCloudWatchAgent\HSS-DEV-IIS-cwconfig.json"
+      args:
+        executable: powershell
+      when: config_stat.stat.exists
 
